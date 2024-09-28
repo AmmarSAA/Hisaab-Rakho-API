@@ -1,0 +1,11 @@
+{
+  "name": "hisaab-rakho-api",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "start": "json-server --host 0.0.0.0 --watch database.json --port 3000"
+  },
+  "dependencies": {
+    "json-server": "^0.17.0"
+  }
+}
