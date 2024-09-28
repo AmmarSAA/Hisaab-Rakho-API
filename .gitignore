@@ -30,3 +30,4 @@ package-lock.json
 *.tmp
 *.bak
 *.swp
+.vercel
