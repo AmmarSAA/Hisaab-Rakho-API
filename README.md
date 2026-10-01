@@ -1,95 +1,61 @@
-# Hisaab Rakho API
+# Hisaab Rakho private API
 
-Welcome to the Hisaab Rakho API. This API is designed to manage financial records and transactions efficiently.
+Production: https://hisaab-private-api.s-ammarahmed14.workers.dev
 
-## Table of Contents
+Cloudflare Workers provides the API; D1 stores records persistently. All user and
+transaction routes require an expiring Bearer session. The old unauthenticated
+JSON Server handler now returns HTTP 410.
 
-- [Introduction](#introduction)
-- [Getting Started](#getting-started)
-- [Endpoints](#endpoints)
-- [License](#license)
+## Authentication
 
-## Introduction
+POST /auth/register with JSON email, password (at least 12 characters), and
+optional name creates an account. POST /auth/login with email and password
+returns { token, expires_at, user }. Sessions expire after one hour. Send
+Authorization: Bearer <token> with subsequent requests. POST /auth/logout
+revokes that session. GET /auth/me returns the signed-in profile and totals.
+Passwords and password hashes are never returned.
 
-Hisaab Rakho API provides a set of endpoints to manage users, transactions, and financial records. It is built to be simple, secure, and scalable.
+## Data routes
 
-## Getting Started
+GET /users and GET /users/:id return only the authenticated user. GET
+/transaction and GET /transaction/:id return only their transactions. Supported
+filters are id and user_id; they never override session ownership. POST
+/transaction, PATCH or PUT /transaction/:id, and DELETE /transaction/:id operate
+only on that user's records. Transaction input requires amount and income on
+creation. Amount accepts a finite nonnegative number or a plain decimal string.
+PATCH /users/:id permits only name, avatar, currency_symbol, currency_name,
+and gender. Database exports and legacy password lookup are disabled.
 
-To start using the Hisaab Rakho API, follow these steps:
+## Existing accounts
 
-1. **Clone the repository:**
+The six imported accounts are locked because their historical passwords were
+committed to the old public repository. The 27 imported transactions are retained
+in D1 and isolated by their original owner IDs. Hashing those compromised
+passwords would not protect the accounts. Verified password recovery is needed
+before imported accounts may sign in. Do not restore historical credentials.
 
-    ```sh
-    git clone https://github.com/ammarsaa/hisaab-rakho-api.git
-    ```
+The Flutter Hisaab-Rakho-2.0 client still uses a legacy Railway URL and compares
+passwords obtained from GET /users. It must change to /auth/login, store the
+returned session, send Authorization on API calls, and stop storing passwords.
+Its old login flow intentionally cannot work against this API. HisaabRakho is a
+separate local demonstration. This change does not deploy those Flutter apps.
 
-2. **Install dependencies:**
+## Development and deployment
 
-    ```sh
-    cd hisaab-rakho-api
-    npm install -g json-server
-    ```
+Use Node 24 or newer. npm install; npm test; npm run dev. Initialize the local
+D1 schema with npx wrangler d1 migrations apply hisaab-private --local. Deployment
+uses npm run deploy and the account/database IDs in wrangler.jsonc. npm test
+exercises authentication, ownership isolation, filters, validation, expiry,
+logout, CORS and persistence using an actual SQLite database adapter.
 
-3. **Run the server:**
+ALLOWED_ORIGINS is empty by default: native clients work; browser calls from an
+Origin are denied until an exact trusted frontend origin is configured.
 
-    ```sh
-    json-server --watch database.json --port 3000
-    ```
+## Private migration
 
-## Endpoints
-
-### User Endpoints
-
-- **Create User**
-
-    ```http
-    POST /users
-    ```
-
-- **Get All Users**
-
-    ```http
-    GET /users
-    ```
-
-- **Get User By ID**
-
-    ```http
-    GET /users?id={id}
-    ```
-
-- **Get User By email**
-
-    ```http
-    GET /user?email={email}
-    ```
-
-### Transaction Endpoints
-
-- **Create Transaction**
-
-    ```http
-    POST /transaction
-    ```
-
-- **Get All Transactions**
-
-    ```http
-    GET /transaction
-    ```
-
-- **Get Transaction By ID**
-
-    ```http
-    GET /transaction?id={id}
-    ```
-
-- **Get Transaction By User ID**
-
-    ```http
-    GET /transaction?user_id={user_id}
-    ```
-
-## License
-
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+scripts/migrate-private.mjs accepts a local historical JSON database and output
+path. Its ignored .private-migration.json file contains parameterized inserts,
+locked salted hashes and financial records; never commit or publish it. Apply
+it only to a fresh private D1 database using authenticated account access.
+Historical backups in Git history remain exposed and require a separate
+repository cleanup; no public financial export is deployed with this Worker.

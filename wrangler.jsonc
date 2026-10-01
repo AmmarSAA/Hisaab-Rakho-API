@@ -1,0 +1,10 @@
+{
+  "name": "hisaab-private-api",
+  "main": "worker/index.mjs",
+  "compatibility_date": "2026-10-01",
+  "account_id": "3f21e2c37b242ee4e55527923b789975",
+  "workers_dev": true,
+  "observability": {"enabled": true, "traces": {"enabled": true}},
+  "d1_databases": [{"binding":"DB","database_name":"hisaab-private","database_id":"f1050f20-81c4-40f3-869a-1ada15261fed","migrations_dir":"migrations"}],
+  "vars": {"ALLOWED_ORIGINS":""}
+}
