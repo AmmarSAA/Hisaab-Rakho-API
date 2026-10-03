@@ -34,11 +34,41 @@ in D1 and isolated by their original owner IDs. Hashing those compromised
 passwords would not protect the accounts. Verified password recovery is needed
 before imported accounts may sign in. Do not restore historical credentials.
 
-The Flutter Hisaab-Rakho-2.0 client still uses a legacy Railway URL and compares
-passwords obtained from GET /users. It must change to /auth/login, store the
-returned session, send Authorization on API calls, and stop storing passwords.
-Its old login flow intentionally cannot work against this API. HisaabRakho is a
-separate local demonstration. This change does not deploy those Flutter apps.
+The Hisaab-Rakho-2.0 Flutter client uses this private API and is published at
+https://hisaab-rakho-ammarsaa.netlify.app. It uses expiring sessions and the account
+recovery flow; browser refresh requires sign-in because web tokens stay in memory.
+HisaabRakho remains a separate local demonstration.
+
+## Recovery and email delivery
+
+POST /auth/recover with JSON `{ "email": "account@example.com" }` returns the
+same HTTP 202 message for known and unknown accounts. Rate limits prevent repeated
+requests. An existing account receives a single-use link to `/reset#<token>`;
+the token expires in 30 minutes and its hash is stored in D1. POST /auth/reset
+accepts `{ "token": "...", "password": "..." }`, consumes the token, replaces the
+password hash, unlocks the account and revokes prior sessions. Passwords must
+contain at least 12 characters.
+
+The Worker owns recovery state and sends email requests to a separate Netlify
+function, `/api/recovery-mail`. That function uses Nodemailer and a TLS SMTP
+connection. Requests are authenticated with an HMAC-SHA256 signature over the
+timestamp and exact JSON body; the relay checks freshness and rejects replays.
+The browser never receives SMTP credentials or the relay secret.
+
+Configure these Worker bindings securely:
+
+- `RECOVERY_RELAY_URL`: the HTTPS Netlify `/api/recovery-mail` URL.
+- `RECOVERY_RELAY_SECRET`: a shared random secret of at least 32 characters,
+  also configured privately on the Netlify relay.
+- `PUBLIC_BASE_URL`: the HTTPS Worker origin used in recovery links.
+- `ALLOWED_ORIGINS`: exact trusted frontend origins, separated by commas.
+
+Configure the relay's SMTP host, port, user, password, sender address and shared
+relay secret in Netlify environment variables. Use port 465 with implicit TLS or
+587 with required STARTTLS. Never put credentials in source, Flutter assets,
+public build variables or logs. `worker/mailer.mjs` is the independently tested
+Nodemailer mail implementation; the Worker itself uses `worker/mail-relay.mjs`
+and does not import the Node SMTP transport.
 
 ## Development and deployment
 
@@ -48,8 +78,9 @@ uses npm run deploy and the account/database IDs in wrangler.jsonc. npm test
 exercises authentication, ownership isolation, filters, validation, expiry,
 logout, CORS and persistence using an actual SQLite database adapter.
 
-ALLOWED_ORIGINS is empty by default: native clients work; browser calls from an
-Origin are denied until an exact trusted frontend origin is configured.
+The checked-in ALLOWED_ORIGINS permits the configured Netlify frontend and the
+existing GitHub frontend origin. Native clients have no browser Origin header.
+Other browser origins are rejected; same-origin Worker reset requests are allowed.
 
 ## Private migration
 

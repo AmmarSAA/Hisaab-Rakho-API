@@ -1,3 +1,5 @@
+import {recover,reset,resetPage} from './recovery.mjs';
+import {relayConfigured,sendRecoveryRelay} from './mail-relay.mjs';
 const encoder = new TextEncoder();
 const iterations = 100000;
 const hex = bytes => Array.from(new Uint8Array(bytes), x => x.toString(16).padStart(2, '0')).join('');
@@ -62,6 +64,9 @@ async function handler(request,env) {
   const db=env.DB,url=new URL(request.url),route=url.pathname.replace(/\/$/,'')||'/',method=request.method;
   if(route==='/'&&method==='GET')return {service:'Hisaab Rakho private API',authentication:'POST /auth/login, then Authorization: Bearer <token>',health:'/health'};
   if(route==='/health'&&method==='GET'){await db.prepare('SELECT 1').first();return {status:'ok'};}
+  if(route==='/reset'&&method==='GET')return resetPage(random);
+  if(route==='/auth/recover'&&method==='POST'){if(!env.sendRecovery)fail(503,'Password recovery is temporarily unavailable');return recover(request,env,await body(request),{digest,random});}
+  if(route==='/auth/reset'&&method==='POST'){await throttle(request,db);return reset(env,await body(request),{digest,hashPassword,fail});}
   if((route==='/auth/login'||route==='/auth/register')&&method==='POST'){
     await throttle(request,db);const input=await body(request);
     if(typeof input.email!=='string'||input.email.length>254||!/^\S+@\S+\.\S+$/.test(input.email)||typeof input.password!=='string'||input.password.length>256)fail(400,'Invalid credentials');
@@ -120,13 +125,19 @@ async function handler(request,env) {
   }
   fail(404,'Not found');
 }
-export default {async fetch(request,env) {
+export default {async fetch(request,env,ctx) {
+  const suppliedSender=env.sendRecovery;
+  env={...env,
+    sendRecovery:suppliedSender || (relayConfigured(env)?(message=>sendRecoveryRelay(env,message)):undefined),
+    waitUntil:ctx?.waitUntil?ctx.waitUntil.bind(ctx):env.waitUntil,
+  };
   const origin=request.headers.get('Origin');const allowed=(env.ALLOWED_ORIGINS||'').split(',').filter(Boolean);
+  if(env.PUBLIC_BASE_URL)allowed.push(new URL(env.PUBLIC_BASE_URL).origin);
   if(origin&&!allowed.includes(origin))return Response.json({error:'Origin not allowed'},{status:403});
   let response;
   try {if(request.method==='OPTIONS')response=new Response(null,{status:204});else{const result=await handler(request,env);response=result instanceof Response?result:Response.json(result);}}
   catch(error){response=Response.json({error:error instanceof HttpError?error.message:'Service unavailable'},{status:error instanceof HttpError?error.status:503});}
-  const headers=new Headers(response.headers);headers.set('Cache-Control','no-store');headers.set('X-Content-Type-Options','nosniff');headers.set('Content-Security-Policy',"default-src 'none'; frame-ancestors 'none'");
+  const headers=new Headers(response.headers);headers.set('Cache-Control','no-store');headers.set('X-Content-Type-Options','nosniff');if(!headers.has('Content-Security-Policy'))headers.set('Content-Security-Policy',"default-src 'none'; frame-ancestors 'none'");
   if(origin){headers.set('Access-Control-Allow-Origin',origin);headers.set('Vary','Origin');headers.set('Access-Control-Allow-Headers','Authorization, Content-Type');headers.set('Access-Control-Allow-Methods','GET, POST, PUT, PATCH, DELETE, OPTIONS');}
   return new Response(response.body,{status:response.status,headers});
 }};

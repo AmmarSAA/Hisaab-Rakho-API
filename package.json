@@ -6,8 +6,15 @@
     "start": "wrangler dev",
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "test": "node --test test/private-api.test.mjs"
+    "test": "node --test"
   },
-  "engines": {"node": ">=24"},
-  "devDependencies": {"wrangler":"4.145.0"}
+  "engines": {
+    "node": ">=24"
+  },
+  "devDependencies": {
+    "wrangler": "4.145.0"
+  },
+  "dependencies": {
+    "nodemailer": "10.0.13"
+  }
 }

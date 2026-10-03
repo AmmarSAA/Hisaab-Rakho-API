@@ -6,5 +6,5 @@
   "workers_dev": true,
   "observability": {"enabled": true, "traces": {"enabled": true}},
   "d1_databases": [{"binding":"DB","database_name":"hisaab-private","database_id":"f1050f20-81c4-40f3-869a-1ada15261fed","migrations_dir":"migrations"}],
-  "vars": {"ALLOWED_ORIGINS":""}
+  "vars": {"ALLOWED_ORIGINS":"https://ammarsaa.github.io,https://hisaab-rakho-ammarsaa.netlify.app", "PUBLIC_BASE_URL":"https://hisaab-private-api.s-ammarahmed14.workers.dev"}
 }
