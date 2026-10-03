@@ -31,3 +31,6 @@ package-lock.json
 *.bak
 *.swp
 .vercel
+.private-*
+.wrangler/
+.dev.vars*

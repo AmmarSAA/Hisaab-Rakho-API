@@ -3,10 +3,18 @@
   "version": "1.0.0",
   "main": "server.js",
   "scripts": {
-    "start": "nodemon server.js"
+    "start": "wrangler dev",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "devDependencies": {
+    "wrangler": "4.145.0"
   },
   "dependencies": {
-    "json-server": "^0.17.0",
-    "nodemon": "^3.1.7"
+    "nodemailer": "10.0.13"
   }
 }

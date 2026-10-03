@@ -1,95 +1,92 @@
-# Hisaab Rakho API
+# Hisaab Rakho private API
 
-Welcome to the Hisaab Rakho API. This API is designed to manage financial records and transactions efficiently.
+Production: https://hisaab-private-api.s-ammarahmed14.workers.dev
 
-## Table of Contents
+Cloudflare Workers provides the API; D1 stores records persistently. All user and
+transaction routes require an expiring Bearer session. The old unauthenticated
+JSON Server handler now returns HTTP 410.
 
-- [Introduction](#introduction)
-- [Getting Started](#getting-started)
-- [Endpoints](#endpoints)
-- [License](#license)
+## Authentication
 
-## Introduction
+POST /auth/register with JSON email, password (at least 12 characters), and
+optional name creates an account. POST /auth/login with email and password
+returns { token, expires_at, user }. Sessions expire after one hour. Send
+Authorization: Bearer <token> with subsequent requests. POST /auth/logout
+revokes that session. GET /auth/me returns the signed-in profile and totals.
+Passwords and password hashes are never returned.
 
-Hisaab Rakho API provides a set of endpoints to manage users, transactions, and financial records. It is built to be simple, secure, and scalable.
+## Data routes
 
-## Getting Started
+GET /users and GET /users/:id return only the authenticated user. GET
+/transaction and GET /transaction/:id return only their transactions. Supported
+filters are id and user_id; they never override session ownership. POST
+/transaction, PATCH or PUT /transaction/:id, and DELETE /transaction/:id operate
+only on that user's records. Transaction input requires amount and income on
+creation. Amount accepts a finite nonnegative number or a plain decimal string.
+PATCH /users/:id permits only name, avatar, currency_symbol, currency_name,
+and gender. Database exports and legacy password lookup are disabled.
 
-To start using the Hisaab Rakho API, follow these steps:
+## Existing accounts
 
-1. **Clone the repository:**
+The six imported accounts are locked because their historical passwords were
+committed to the old public repository. The 27 imported transactions are retained
+in D1 and isolated by their original owner IDs. Hashing those compromised
+passwords would not protect the accounts. Verified password recovery is needed
+before imported accounts may sign in. Do not restore historical credentials.
 
-    ```sh
-    git clone https://github.com/ammarsaa/hisaab-rakho-api.git
-    ```
+The Hisaab-Rakho-2.0 Flutter client uses this private API and is published at
+https://hisaab-rakho-ammarsaa.netlify.app. It uses expiring sessions and the account
+recovery flow; browser refresh requires sign-in because web tokens stay in memory.
+HisaabRakho remains a separate local demonstration.
 
-2. **Install dependencies:**
+## Recovery and email delivery
 
-    ```sh
-    cd hisaab-rakho-api
-    npm install -g json-server
-    ```
+POST /auth/recover with JSON `{ "email": "account@example.com" }` returns the
+same HTTP 202 message for known and unknown accounts. Rate limits prevent repeated
+requests. An existing account receives a single-use link to `/reset#<token>`;
+the token expires in 30 minutes and its hash is stored in D1. POST /auth/reset
+accepts `{ "token": "...", "password": "..." }`, consumes the token, replaces the
+password hash, unlocks the account and revokes prior sessions. Passwords must
+contain at least 12 characters.
 
-3. **Run the server:**
+The Worker owns recovery state and sends email requests to a separate Netlify
+function, `/api/recovery-mail`. That function uses Nodemailer and a TLS SMTP
+connection. Requests are authenticated with an HMAC-SHA256 signature over the
+timestamp and exact JSON body; the relay checks freshness and rejects replays.
+The browser never receives SMTP credentials or the relay secret.
 
-    ```sh
-    json-server --watch database.json --port 3000
-    ```
+Configure these Worker bindings securely:
 
-## Endpoints
+- `RECOVERY_RELAY_URL`: the HTTPS Netlify `/api/recovery-mail` URL.
+- `RECOVERY_RELAY_SECRET`: a shared random secret of at least 32 characters,
+  also configured privately on the Netlify relay.
+- `PUBLIC_BASE_URL`: the HTTPS Worker origin used in recovery links.
+- `ALLOWED_ORIGINS`: exact trusted frontend origins, separated by commas.
 
-### User Endpoints
+Configure the relay's SMTP host, port, user, password, sender address and shared
+relay secret in Netlify environment variables. Use port 465 with implicit TLS or
+587 with required STARTTLS. Never put credentials in source, Flutter assets,
+public build variables or logs. `worker/mailer.mjs` is the independently tested
+Nodemailer mail implementation; the Worker itself uses `worker/mail-relay.mjs`
+and does not import the Node SMTP transport.
 
-- **Create User**
+## Development and deployment
 
-    ```http
-    POST /users
-    ```
+Use Node 24 or newer. npm install; npm test; npm run dev. Initialize the local
+D1 schema with npx wrangler d1 migrations apply hisaab-private --local. Deployment
+uses npm run deploy and the account/database IDs in wrangler.jsonc. npm test
+exercises authentication, ownership isolation, filters, validation, expiry,
+logout, CORS and persistence using an actual SQLite database adapter.
 
-- **Get All Users**
+The checked-in ALLOWED_ORIGINS permits the configured Netlify frontend and the
+existing GitHub frontend origin. Native clients have no browser Origin header.
+Other browser origins are rejected; same-origin Worker reset requests are allowed.
 
-    ```http
-    GET /users
-    ```
+## Private migration
 
-- **Get User By ID**
-
-    ```http
-    GET /users?id={id}
-    ```
-
-- **Get User By email**
-
-    ```http
-    GET /user?email={email}
-    ```
-
-### Transaction Endpoints
-
-- **Create Transaction**
-
-    ```http
-    POST /transaction
-    ```
-
-- **Get All Transactions**
-
-    ```http
-    GET /transaction
-    ```
-
-- **Get Transaction By ID**
-
-    ```http
-    GET /transaction?id={id}
-    ```
-
-- **Get Transaction By User ID**
-
-    ```http
-    GET /transaction?user_id={user_id}
-    ```
-
-## License
-
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+scripts/migrate-private.mjs accepts a local historical JSON database and output
+path. Its ignored .private-migration.json file contains parameterized inserts,
+locked salted hashes and financial records; never commit or publish it. Apply
+it only to a fresh private D1 database using authenticated account access.
+Historical backups in Git history remain exposed and require a separate
+repository cleanup; no public financial export is deployed with this Worker.

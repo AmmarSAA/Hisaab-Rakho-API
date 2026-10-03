@@ -1,0 +1,40 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {DatabaseSync} from 'node:sqlite';
+import {readFileSync} from 'node:fs';
+import worker,{hashPassword} from '../worker/index.mjs';
+
+function binding(sqlite) {return {prepare(sql){let parameters=[];return {bind(...args){parameters=args;return this;},async first(){return sqlite.prepare(sql).get(...parameters)||null;},async all(){return {results:sqlite.prepare(sql).all(...parameters)};},async run(){return {meta:sqlite.prepare(sql).run(...parameters)};}};},async batch(statements){sqlite.exec('BEGIN');try{const results=[];for(const statement of statements)results.push(await statement.run());sqlite.exec('COMMIT');return results;}catch(error){sqlite.exec('ROLLBACK');throw error;}}};}
+test('private API authentication, durable CRUD and ownership isolation',async()=>{
+ const sqlite=new DatabaseSync(':memory:');sqlite.exec(readFileSync(new URL('../migrations/0001_private.sql',import.meta.url),'utf8'));
+ const env={DB:binding(sqlite),ALLOWED_ORIGINS:'https://app.example'};
+ sqlite.prepare('INSERT INTO users VALUES(?,?,?,?)').run('imported','imported@example.com','locked:'+await hashPassword('Compromised password'),JSON.stringify({name:'Imported'}));
+ for(const id of ['one','two'])sqlite.prepare('INSERT INTO users VALUES(?,?,?,?)').run(id,`${id}@example.com`,await hashPassword('Test password 123!'),JSON.stringify({name:id}));
+ const call=(path,{method='GET',token,body,origin}={})=>worker.fetch(new Request(`https://api.example${path}`,{method,headers:{...(body?{'Content-Type':'application/json'}:{}),...(token?{Authorization:`Bearer ${token}`}:{ }),...(origin?{Origin:origin}:{})},...(body?{body:JSON.stringify(body)}:{})}),env);
+ for(const path of ['/users','/transaction','/db','/users/one','/transaction/one'])assert.equal((await call(path)).status,401);
+ assert.equal((await call('/auth/login',{method:'POST',body:{email:'one@example.com',password:'wrong'}})).status,401);
+ assert.equal((await call('/auth/login',{method:'POST',body:{email:'imported@example.com',password:'Compromised password'}})).status,401);
+ const login=async id=>{const response=await call('/auth/login',{method:'POST',body:{email:`${id}@example.com`,password:'Test password 123!'}});assert.equal(response.status,200);const data=await response.json();assert.equal('password' in data.user,false);assert.equal('password_hash' in data.user,false);return data.token;};
+ const one=await login('one'),two=await login('two');
+ const response=await call('/transaction',{method:'POST',token:one,body:{amount:25,income:false,description:'Test'}});assert.equal(response.status,201);const transaction=await response.json();
+ assert.equal((await call(`/transaction/${transaction.id}`,{token:two})).status,404);
+ for(const method of ['PUT','PATCH','DELETE'])assert.equal((await call(`/transaction/${transaction.id}`,{method,token:two,...(method==='DELETE'?{}:{body:{amount:1,income:true}})})).status,404);
+ assert.deepEqual(await (await call('/transaction?user_id=one',{token:two})).json(),[]);
+ assert.equal((await call('/transaction?_where=1',{token:two})).status,400);
+ assert.equal((await call('/transaction',{method:'POST',token:one,body:{user_id:'two',amount:4,income:true}})).status,403);
+ assert.equal((await call('/transaction',{method:'POST',token:one,body:{amount:-1,income:true}})).status,400);
+ assert.equal((await call('/transaction',{method:'POST',token:one,body:{amount:'',income:true}})).status,400);
+ const decimal=await call('/transaction',{method:'POST',token:one,body:{amount:'12.50',income:true}});assert.equal(decimal.status,201);const decimalRecord=await decimal.json();assert.equal(decimalRecord.amount,12.5);assert.equal((await call(`/transaction/${decimalRecord.id}`,{method:'DELETE',token:one})).status,200);
+ assert.equal((await call('/db',{token:one})).status,403);
+ assert.equal((await call('/users/two',{token:one})).status,404);
+ assert.equal((await call('/users/one',{method:'PATCH',token:one,body:{password:'new'}})).status,400);
+ assert.equal((await call('/transaction',{token:one,origin:'https://evil.example'})).status,403);
+ assert.equal((await call('/transaction',{token:one,origin:'https://app.example'})).headers.get('Access-Control-Allow-Origin'),'https://app.example');
+ const secondWorker={...worker};assert.equal((await (await secondWorker.fetch(new Request('https://api.example/transaction',{headers:{Authorization:`Bearer ${one}`}}),env)).json()).length,1);
+ assert.equal((await call(`/transaction/${transaction.id}`,{method:'PATCH',token:one,body:{amount:50}})).status,200);
+ assert.equal((await call('/auth/me',{token:one})).headers.get('Cache-Control'),'no-store');
+ assert.equal((await call('/auth/logout',{method:'POST',token:one})).status,200);
+ assert.equal((await call('/transaction',{token:one})).status,401);
+ sqlite.prepare('UPDATE sessions SET expires=0').run();assert.equal((await call('/transaction',{token:two})).status,401);
+ sqlite.close();
+});
